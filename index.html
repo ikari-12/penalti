@@ -2,11 +2,11 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Pênalti 2D Realista</title>
+<title>Pênalti 2D Jogável</title>
 <style>
 body{
     margin:0;
-    background:#1a1a1a;
+    background:#111;
     display:flex;
     justify-content:center;
     align-items:center;
@@ -28,9 +28,12 @@ const ctx = canvas.getContext("2d");
 
 const WIDTH = canvas.width;
 const HEIGHT = canvas.height;
-const GRAVITY = 900; // px/s²
+
+const GRAVITY = 1200;
+const GOAL_Y = 80;
 
 let lastTime = 0;
+let state = "aim"; // aim | shooting
 
 class Ball {
     constructor(){
@@ -43,34 +46,19 @@ class Ball {
         this.y = HEIGHT-60;
         this.vx = 0;
         this.vy = 0;
-        this.active = false;
     }
 
-    shoot(targetX,targetY){
-        let dx = targetX - this.x;
-        let dy = targetY - this.y;
-
-        let length = Math.sqrt(dx*dx+dy*dy);
-        dx /= length;
-        dy /= length;
-
-        let force = 600;
-
-        this.vx = dx * force;
-        this.vy = dy * force;
-        this.active = true;
+    shoot(powerX,powerY){
+        this.vx = powerX;
+        this.vy = powerY;
     }
 
     update(dt){
-        if(!this.active) return;
+        if(state !== "shooting") return;
 
         this.vy += GRAVITY * dt;
         this.x += this.vx * dt;
         this.y += this.vy * dt;
-
-        // Limites laterais
-        if(this.x < this.radius) this.x = this.radius;
-        if(this.x > WIDTH - this.radius) this.x = WIDTH - this.radius;
     }
 
     draw(){
@@ -83,45 +71,31 @@ class Ball {
 
 class Goalkeeper{
     constructor(){
-        this.width = 100;
+        this.width = 110;
         this.height = 20;
-        this.baseX = WIDTH/2 - 50;
         this.reset();
     }
 
     reset(){
-        this.x = this.baseX;
-        this.y = 80;
-        this.jumping = false;
-        this.reactionTime = 0.2; // segundos
-        this.timer = 0;
-        this.direction = 0;
+        this.x = WIDTH/2 - this.width/2;
+        this.y = GOAL_Y;
+        this.targetX = this.x;
+        this.speed = 600;
     }
 
     react(ballX){
-        this.targetX = ballX - this.width/2;
-        this.jumping = true;
-        this.timer = 0;
+        // 70% chance de acertar o lado
+        let error = Math.random() < 0.3 ? (Math.random()*200-100) : 0;
+        this.targetX = ballX - this.width/2 + error;
     }
 
     update(dt){
-        if(!this.jumping) return;
+        let dx = this.targetX - this.x;
+        this.x += dx * dt * 5;
 
-        this.timer += dt;
-
-        if(this.timer >= this.reactionTime){
-            let speed = 500;
-            let dx = this.targetX - this.x;
-            this.x += dx * 0.1;
-
-            // Pequeno pulo visual
-            this.y = 80 - 40 * Math.sin((this.timer-this.reactionTime)*6);
-
-            if(Math.abs(dx) < 5){
-                this.jumping = false;
-                this.y = 80;
-            }
-        }
+        // limite dentro do gol
+        if(this.x < 250) this.x = 250;
+        if(this.x + this.width > 550) this.x = 550 - this.width;
     }
 
     draw(){
@@ -135,48 +109,60 @@ const keeper = new Goalkeeper();
 
 let goals = 0;
 let attempts = 0;
-let message = "";
 
-// CONTROLE
+let dragStart = null;
+
+// ===== CONTROLE (ARRASTAR PARA CHUTAR) =====
 canvas.addEventListener("mousedown",(e)=>{
-    if(ball.active) return;
-
+    if(state !== "aim") return;
     const rect = canvas.getBoundingClientRect();
-    const tx = e.clientX - rect.left;
-    const ty = e.clientY - rect.top;
-
-    ball.shoot(tx,ty);
-    keeper.react(tx);
+    dragStart = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+    };
 });
 
-// COLISÃO
-function checkCollision(){
-    if(!ball.active) return;
+canvas.addEventListener("mouseup",(e)=>{
+    if(state !== "aim" || !dragStart) return;
 
-    // Defesa
+    const rect = canvas.getBoundingClientRect();
+    const endX = e.clientX - rect.left;
+    const endY = e.clientY - rect.top;
+
+    let powerX = (dragStart.x - endX) * 6;
+    let powerY = (dragStart.y - endY) * 6;
+
+    ball.shoot(powerX, powerY);
+    keeper.react(ball.x);
+
+    state = "shooting";
+    dragStart = null;
+});
+
+// ===== COLISÕES =====
+function checkResult(){
+    if(state !== "shooting") return;
+
+    // defesa
     if(
         ball.y - ball.radius <= keeper.y + keeper.height &&
         ball.x + ball.radius >= keeper.x &&
-        ball.x - ball.radius <= keeper.x + keeper.width &&
-        ball.y > 50
+        ball.x - ball.radius <= keeper.x + keeper.width
     ){
         attempts++;
-        message = "DEFENDEU!";
         resetRound();
     }
 
-    // Gol
-    if(ball.y <= 50){
+    // gol
+    if(ball.y <= GOAL_Y){
         goals++;
         attempts++;
-        message = "GOOOOL!";
         resetRound();
     }
 
-    // Se cair no chão
+    // se cair no chão
     if(ball.y > HEIGHT){
         attempts++;
-        message = "ERROU!";
         resetRound();
     }
 }
@@ -184,22 +170,25 @@ function checkCollision(){
 function resetRound(){
     ball.reset();
     keeper.reset();
+    state = "aim";
 }
 
+// ===== RENDER =====
 function drawField(){
     ctx.clearRect(0,0,WIDTH,HEIGHT);
 
     ctx.strokeStyle="white";
     ctx.lineWidth=4;
-    ctx.strokeRect(250,50,300,100);
+    ctx.strokeRect(250,GOAL_Y,300,100);
 
     ctx.fillStyle="white";
     ctx.font="18px Arial";
     ctx.fillText("Gols: "+goals,20,30);
     ctx.fillText("Tentativas: "+attempts,20,55);
 
-    ctx.font="30px Arial";
-    ctx.fillText(message,WIDTH/2-70,HEIGHT/2);
+    if(state==="aim"){
+        ctx.fillText("Arraste o mouse para chutar",WIDTH/2-120,HEIGHT-20);
+    }
 }
 
 function gameLoop(timestamp){
@@ -208,7 +197,7 @@ function gameLoop(timestamp){
 
     ball.update(dt);
     keeper.update(dt);
-    checkCollision();
+    checkResult();
 
     drawField();
     ball.draw();
