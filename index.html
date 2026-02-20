@@ -26,18 +26,21 @@ canvas{
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
-// ==================== FÍSICA ====================
-const GRAVITY = 0.25;
+const WIDTH = canvas.width;
+const HEIGHT = canvas.height;
+const GRAVITY = 900; // px/s²
+
+let lastTime = 0;
 
 class Ball {
     constructor(){
+        this.radius = 10;
         this.reset();
     }
 
     reset(){
-        this.x = 400;
-        this.y = 420;
-        this.radius = 10;
+        this.x = WIDTH/2;
+        this.y = HEIGHT-60;
         this.vx = 0;
         this.vy = 0;
         this.active = false;
@@ -47,19 +50,27 @@ class Ball {
         let dx = targetX - this.x;
         let dy = targetY - this.y;
 
-        let power = 0.15;
+        let length = Math.sqrt(dx*dx+dy*dy);
+        dx /= length;
+        dy /= length;
 
-        this.vx = dx * power;
-        this.vy = dy * power;
+        let force = 600;
+
+        this.vx = dx * force;
+        this.vy = dy * force;
         this.active = true;
     }
 
-    update(){
+    update(dt){
         if(!this.active) return;
 
-        this.vy += GRAVITY;
-        this.x += this.vx;
-        this.y += this.vy;
+        this.vy += GRAVITY * dt;
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        // Limites laterais
+        if(this.x < this.radius) this.x = this.radius;
+        if(this.x > WIDTH - this.radius) this.x = WIDTH - this.radius;
     }
 
     draw(){
@@ -72,33 +83,43 @@ class Ball {
 
 class Goalkeeper{
     constructor(){
-        this.baseX = 350;
-        this.x = 350;
-        this.y = 80;
         this.width = 100;
         this.height = 20;
+        this.baseX = WIDTH/2 - 50;
+        this.reset();
+    }
+
+    reset(){
+        this.x = this.baseX;
+        this.y = 80;
         this.jumping = false;
-        this.jumpTime = 0;
+        this.reactionTime = 0.2; // segundos
+        this.timer = 0;
         this.direction = 0;
     }
 
     react(ballX){
-        this.direction = ballX < 400 ? -1 : 1;
+        this.targetX = ballX - this.width/2;
         this.jumping = true;
-        this.jumpTime = 0;
+        this.timer = 0;
     }
 
-    update(){
-        if(this.jumping){
-            this.jumpTime += 0.05;
+    update(dt){
+        if(!this.jumping) return;
 
-            this.x = this.baseX + this.direction * 150 * this.jumpTime;
-            this.y = 80 - Math.sin(this.jumpTime*Math.PI)*80;
+        this.timer += dt;
 
-            if(this.jumpTime>=1){
-                this.jumping=false;
-                this.x=this.baseX;
-                this.y=80;
+        if(this.timer >= this.reactionTime){
+            let speed = 500;
+            let dx = this.targetX - this.x;
+            this.x += dx * 0.1;
+
+            // Pequeno pulo visual
+            this.y = 80 - 40 * Math.sin((this.timer-this.reactionTime)*6);
+
+            if(Math.abs(dx) < 5){
+                this.jumping = false;
+                this.y = 80;
             }
         }
     }
@@ -114,8 +135,9 @@ const keeper = new Goalkeeper();
 
 let goals = 0;
 let attempts = 0;
+let message = "";
 
-// ==================== CONTROLE ====================
+// CONTROLE
 canvas.addEventListener("mousedown",(e)=>{
     if(ball.active) return;
 
@@ -127,35 +149,45 @@ canvas.addEventListener("mousedown",(e)=>{
     keeper.react(tx);
 });
 
-// ==================== GAME LOOP ====================
-function update(){
-    ball.update();
-    keeper.update();
+// COLISÃO
+function checkCollision(){
+    if(!ball.active) return;
 
-    if(ball.active){
-        // Defesa
-        if(
-            ball.y - ball.radius <= keeper.y + keeper.height &&
-            ball.x >= keeper.x &&
-            ball.x <= keeper.x + keeper.width
-        ){
-            attempts++;
-            alert("DEFENDEU!");
-            ball.reset();
-        }
+    // Defesa
+    if(
+        ball.y - ball.radius <= keeper.y + keeper.height &&
+        ball.x + ball.radius >= keeper.x &&
+        ball.x - ball.radius <= keeper.x + keeper.width &&
+        ball.y > 50
+    ){
+        attempts++;
+        message = "DEFENDEU!";
+        resetRound();
+    }
 
-        // Gol
-        if(ball.y <= 50){
-            goals++;
-            attempts++;
-            alert("GOOOL!");
-            ball.reset();
-        }
+    // Gol
+    if(ball.y <= 50){
+        goals++;
+        attempts++;
+        message = "GOOOOL!";
+        resetRound();
+    }
+
+    // Se cair no chão
+    if(ball.y > HEIGHT){
+        attempts++;
+        message = "ERROU!";
+        resetRound();
     }
 }
 
+function resetRound(){
+    ball.reset();
+    keeper.reset();
+}
+
 function drawField(){
-    ctx.clearRect(0,0,800,500);
+    ctx.clearRect(0,0,WIDTH,HEIGHT);
 
     ctx.strokeStyle="white";
     ctx.lineWidth=4;
@@ -165,17 +197,27 @@ function drawField(){
     ctx.font="18px Arial";
     ctx.fillText("Gols: "+goals,20,30);
     ctx.fillText("Tentativas: "+attempts,20,55);
+
+    ctx.font="30px Arial";
+    ctx.fillText(message,WIDTH/2-70,HEIGHT/2);
 }
 
-function gameLoop(){
+function gameLoop(timestamp){
+    let dt = (timestamp-lastTime)/1000;
+    lastTime = timestamp;
+
+    ball.update(dt);
+    keeper.update(dt);
+    checkCollision();
+
     drawField();
     ball.draw();
     keeper.draw();
-    update();
+
     requestAnimationFrame(gameLoop);
 }
 
-gameLoop();
+requestAnimationFrame(gameLoop);
 </script>
 
 </body>
